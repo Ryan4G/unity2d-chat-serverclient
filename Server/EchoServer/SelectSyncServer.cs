@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 
 namespace EchoServer
 {
@@ -9,7 +10,7 @@ namespace EchoServer
     {
         static Socket serverSocket;
 
-        static Dictionary<Socket, ClientState> clients = new Dictionary<Socket, ClientState>();
+        public static Dictionary<Socket, ClientState> clients = new Dictionary<Socket, ClientState>();
 
         public static void Start(string ip, int port)
         {
@@ -65,6 +66,10 @@ namespace EchoServer
             }
             catch (SocketException ex)
             {
+                MethodInfo mei = typeof(EventHandler).GetMethod("OnDisconnect");
+                object[] obs = { clientState };
+                mei.Invoke(null, obs);
+
                 s.Close();
                 clients.Remove(s);
                 Console.WriteLine($"[ Server ] Receive SocketException :{ex}");
@@ -73,36 +78,60 @@ namespace EchoServer
 
             if (count == 0)
             {
+                MethodInfo mei = typeof(EventHandler).GetMethod("OnDisconnect");
+                object[] obs = { clientState };
+                mei.Invoke(null, obs);
+
+                Console.WriteLine($"[ Server ] Socket Close <- {s.RemoteEndPoint}");
+
                 s.Close();
                 clients.Remove(s);
-                Console.WriteLine($"[ Server ] Socket Close");
                 return false;
             }
 
             var recvStr = System.Text.Encoding.UTF8.GetString(clientState.readBuff, 0, count);
 
-            Console.WriteLine($"[ Server ] Receive : {recvStr}");
+            Console.WriteLine($"[ Server ] Receive <- {s.RemoteEndPoint}: {recvStr}");
 
-            var sendStr = $"{s.RemoteEndPoint}:{recvStr}";
-            byte[] sendBytes = System.Text.Encoding.UTF8.GetBytes(sendStr);
+            var splits = recvStr.Split("|");
 
-            foreach(Socket sk in clients.Keys)
-            {
-                sk.Send(sendBytes);
-            }
+            var msgName = splits[0];
+            var msgArgs = splits[1];
+            string funcName = $"Msg{msgName}";
+
+            MethodInfo mi = typeof(MsgHandler).GetMethod(funcName);
+            object[] o = { clientState, msgArgs };
+            mi.Invoke(null, o);
 
             return true;
         }
 
         private static void ReadListenServer(Socket serverSocket)
         {
-            Console.WriteLine("[ Server ] Accept");
-
             Socket socket = serverSocket.Accept();
             ClientState clientState = new ClientState();
             clientState.socket = socket;
             clients.Add(socket, clientState);
+
+            Console.WriteLine($"[ Server ] Accept <- {socket.RemoteEndPoint}");
         }
 
+        public static void Send(ClientState c, string msg)
+        {
+            if (c.socket != null && c.socket.Connected)
+            {
+                try
+                {
+                    byte[] sendBytes = System.Text.Encoding.UTF8.GetBytes(msg);
+                    c.socket.Send(sendBytes);
+
+                    Console.WriteLine($"[ Server ] Send -> {c.socket.RemoteEndPoint}: {msg}");
+                }
+                catch(SocketException ex)
+                {
+                    Console.WriteLine($"[ Server ] Socket Error: {ex}");
+                }
+            }
+        }
     }
 }
