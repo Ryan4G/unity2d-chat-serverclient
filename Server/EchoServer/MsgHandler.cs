@@ -106,7 +106,7 @@ namespace EchoServer
                 }
             }
 
-            if (hurtClient == null)
+            if (hurtClient == null || hurtClient.hp <= 0)
             {
                 return;
             }

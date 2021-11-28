@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -62,7 +63,10 @@ namespace EchoServer
 
             try
             {
-                count = s.Receive(clientState.readBuff);
+                count = s.Receive(clientState.readBuff, clientState.buffCount, 1024 - clientState.buffCount, SocketFlags.None);
+
+                clientState.buffCount += count;
+
             }
             catch (SocketException ex)
             {
@@ -89,19 +93,21 @@ namespace EchoServer
                 return false;
             }
 
-            var recvStr = System.Text.Encoding.UTF8.GetString(clientState.readBuff, 0, count);
+            OnReceiveData(clientState);
 
-            Console.WriteLine($"[ Server ] Receive <- {s.RemoteEndPoint}: {recvStr}");
+            //var recvStr = System.Text.Encoding.UTF8.GetString(clientState.readBuff, 0, count);
 
-            var splits = recvStr.Split("|");
+            //Console.WriteLine($"[ Server ] Receive <- {s.RemoteEndPoint}: {recvStr}");
 
-            var msgName = splits[0];
-            var msgArgs = splits[1];
-            string funcName = $"Msg{msgName}";
+            //var splits = recvStr.Split("|");
 
-            MethodInfo mi = typeof(MsgHandler).GetMethod(funcName);
-            object[] o = { clientState, msgArgs };
-            mi.Invoke(null, o);
+            //var msgName = splits[0];
+            //var msgArgs = splits[1];
+            //string funcName = $"Msg{msgName}";
+
+            //MethodInfo mi = typeof(MsgHandler).GetMethod(funcName);
+            //object[] o = { clientState, msgArgs };
+            //mi.Invoke(null, o);
 
             return true;
         }
@@ -122,7 +128,18 @@ namespace EchoServer
             {
                 try
                 {
-                    byte[] sendBytes = System.Text.Encoding.UTF8.GetBytes(msg);
+                    byte[] bodyBytes = System.Text.Encoding.UTF8.GetBytes(msg);
+                    short len = (short)bodyBytes.Length;
+                    byte[] lenBytes = BitConverter.GetBytes(len);
+
+                    // length bytes default writen with little endian 
+                    if (!BitConverter.IsLittleEndian)
+                    {
+                        lenBytes.Reverse();
+                    }
+
+                    byte[] sendBytes = lenBytes.Concat(bodyBytes).ToArray();
+
                     c.socket.Send(sendBytes);
 
                     Console.WriteLine($"[ Server ] Send -> {c.socket.RemoteEndPoint}: {msg}");
@@ -132,6 +149,45 @@ namespace EchoServer
                     Console.WriteLine($"[ Server ] Socket Error: {ex}");
                 }
             }
+        }
+
+        private static void OnReceiveData(ClientState clientState)
+        {
+            // only receive package length
+            if (clientState.buffCount <= 2)
+            {
+                return;
+            }
+
+            var bodyLength = (short)((clientState.readBuff[1] << 8) | clientState.readBuff[0]);
+
+            if (clientState.buffCount < 2 + bodyLength)
+            {
+                return;
+            }
+
+            var recvStr = System.Text.Encoding.UTF8.GetString(clientState.readBuff, 2, bodyLength);
+
+            Console.WriteLine($"[ Server ] Receive <- {clientState.socket.RemoteEndPoint}: {recvStr}");
+
+            var splits = recvStr.Split("|");
+
+            var msgName = splits[0];
+            var msgArgs = splits[1];
+            string funcName = $"Msg{msgName}";
+
+            MethodInfo mi = typeof(MsgHandler).GetMethod(funcName);
+            object[] o = { clientState, msgArgs };
+            mi.Invoke(null, o);
+
+            int start = 2 + bodyLength;
+            int count = clientState.buffCount - start;
+
+            Array.Copy(clientState.readBuff, start, clientState.readBuff, 0, count);
+
+            clientState.buffCount -= start;
+
+            OnReceiveData(clientState);
         }
     }
 }

@@ -13,6 +13,8 @@ namespace EchoServer
 
         public byte[] readBuff = new byte[1024];
 
+        public int buffCount = 0;
+
         public int hp = -100;
 
         public float x = 0;
