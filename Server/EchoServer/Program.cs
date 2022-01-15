@@ -9,7 +9,7 @@ namespace EchoServer
     {
         static void Main(string[] args)
         {
-            SelectSyncServer.Start("127.0.0.1", 8888);
+            AsyncServer.Start("127.0.0.1", 8888);
         }
     }
 }
